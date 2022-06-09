@@ -32,6 +32,8 @@ class Args:
     # Dataset parameters
     data_directory: str = field(default="calm/cleaned_corpora", metadata={"help": "path to ClubFloyd transcripts."})
     dataset_load_path: str = None #"clubfloyd_dataset_t5" #"clubfloyd_dataset"
+    game_history_path: str = "game_history.pkl"
+    action_history_path: str = "action_history.pkl"
     dataset_save_path: str = "clubfloyd"
     max_state_length: int = 256
     max_action_length: int = 8
@@ -187,8 +189,8 @@ def main():
 
         if args.dataset_save_path is None:
             dataset_dict.save_to_disk(args.dataset_save_path)
-            pickle.dump(game_history, open("game_history.pkl", "wb"))
-            pickle.dump(action_history, open("action_history.pkl", "wb"))
+            pickle.dump(game_history, open(args.game_history_path, "wb"))
+            pickle.dump(action_history, open(args.action_history_path, "wb"))
 
         # Augment dataset
         with torch.no_grad():
@@ -210,8 +212,8 @@ def main():
         
         model.tokenizer = tokenizer
 
-        if args.dataset_save_path is None:
-            dataset_dict.save_to_disk("clubfloyd_rag")
+        if args.dataset_save_path is not None:
+            dataset_dict.save_to_disk(args.dataset_save_path)
             pickle.dump(game_history, open("game_history.pkl", "wb"))
             pickle.dump(action_history, open("action_history.pkl", "wb"))
 
