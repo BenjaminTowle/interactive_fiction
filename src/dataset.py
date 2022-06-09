@@ -378,8 +378,8 @@ def get_dataset(args):
     if args.dataset_load_path is not None:
         dataset_dict = DatasetDict.load_from_disk(args.dataset_load_path)
         if model_type in [ModelType.generator, ModelType.controller]:
-            game_history = pickle.load(open("game_history.pkl", "rb"))
-            action_history = pickle.load(open("action_history.pkl", "rb"))
+            game_history = pickle.load(open(args.game_history_path, "rb"))
+            action_history = pickle.load(open(args.action_history_path, "rb"))
             return dataset_dict, game_history, action_history
 
         return dataset_dict
