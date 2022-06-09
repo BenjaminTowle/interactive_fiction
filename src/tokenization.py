@@ -1,9 +1,8 @@
 from transformers import GPT2Tokenizer, BertTokenizer, RagTokenizer
-from src.models import ModelType
+
 
 def get_tokenizer(args):
-    model_type = ModelType(args.model_type)
-    if model_type in [ModelType.generator, ModelType.controller]:
+    if args.model_type in ["generator", "controller"]:
         generator = GPT2Tokenizer.from_pretrained(args.generator_tokenizer)
         generator.pad_token = generator.bos_token
         generator.eos_token = generator.bos_token
