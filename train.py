@@ -38,7 +38,7 @@ class Args:
     max_length: int = 312
     test_size = 0.1
     num_negatives = 9
-    debug: bool = True
+    debug: bool = False
 
     generator_path: str = "distilgpt2"
     retriever_path: str = "huawei-noah/TinyBERT_General_4L_312D"
