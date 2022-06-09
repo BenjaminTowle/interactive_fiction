@@ -240,7 +240,8 @@ def _process_clubfloyd_generator_controller(files, tokenizer, args) -> Dataset:
         actions_inputs = tokenizer(all_actions, max_length=args.max_action_length, truncation=True, padding="max_length")
         sample_idxs = [i for i in range(len(all_actions))]
 
-        with tokenizer.as_target_tokenizer():  
+        with tokenizer.as_target_tokenizer(): 
+            all_actions = [a + tokenizer.generator.eos_token for a in all_actions] 
             states_inputs = tokenizer(all_states, max_length=args.max_state_length, truncation=True)
             target_actions_inputs = tokenizer(all_actions, max_length=args.max_action_length, truncation=True)
 
