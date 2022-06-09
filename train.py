@@ -26,7 +26,7 @@ os.environ["WANDB_DISABLED"] = "true"
 @dataclass
 class Args:
     # General parameters
-    model_type: str = field(default="controller", metadata={"choices": ["retriever", "generator", "controller"]})
+    model_type: str = field(default="generator", metadata={"choices": ["retriever", "generator", "controller"]})
     task_type: str = field(default="clubfloyd", metadata={"choices": ["clubfloyd", "jericho"]})
 
     # Dataset parameters
@@ -38,7 +38,7 @@ class Args:
     max_length: int = 312
     test_size = 0.1
     num_negatives = 9
-    debug: bool = False
+    debug: bool = True
 
     generator_path: str = "distilgpt2"
     retriever_path: str = "huawei-noah/TinyBERT_General_4L_312D"
@@ -100,7 +100,7 @@ def _augment_dataset_generator(samples, modules, args, tokenizer):
             doc_input_ids = [i for i in docs["target_input_ids"][0] if i != tokenizer.pad_token_id]
             doc_labels = [-100 for i in docs["target_input_ids"][0] if i != tokenizer.pad_token_id]
 
-            input_ids.append(doc_input_ids + [tokenizer.sep_token_id] + samples["input_ids"][i])
+            input_ids.append(doc_input_ids + [tokenizer.eos_token_id] + samples["input_ids"][i])
             labels.append(doc_labels + [-100] + samples["labels"][i])
 
     # Padding
@@ -149,7 +149,7 @@ def _augment_dataset_controller(samples, modules, args, tokenizer):
             doc_input_ids = [i for i in docs["target_input_ids"][0] if i != tokenizer.pad_token_id]
             doc_labels = [-100 for i in docs["target_input_ids"][0] if i != tokenizer.pad_token_id]
 
-            input_ids = doc_input_ids + [tokenizer.sep_token_id] + samples["input_ids"][i]
+            input_ids = doc_input_ids + [tokenizer.eos_token_id] + samples["input_ids"][i]
             labels = doc_labels + [-100] + samples["labels"][i]
 
             loss = modules.generator(
