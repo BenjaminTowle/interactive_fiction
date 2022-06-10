@@ -31,13 +31,13 @@ class Args:
 
     # Dataset parameters
     data_directory: str = field(default="calm/cleaned_corpora", metadata={"help": "path to ClubFloyd transcripts."})
-    dataset_load_path: str = None #"clubfloyd_dataset_t5" #"clubfloyd_dataset"
+    dataset_load_path: str = "clubfloyd" #"clubfloyd_dataset_t5" #"clubfloyd_dataset"
     game_history_path: str = "game_history.pkl"
     action_history_path: str = "action_history.pkl"
-    dataset_save_path: str = "clubfloyd"
-    max_state_length: int = 256
+    dataset_save_path: str = None #"clubfloyd"
+    max_state_length: int = 64
     max_action_length: int = 8
-    max_length: int = 312
+    max_length: int = 150
     test_size = 0.1
     num_negatives = 9
     debug: bool = False
@@ -187,7 +187,7 @@ def main():
 
         data_collator = DataCollatorWithPadding(tokenizer.generator)
 
-        if args.dataset_save_path is None:
+        if args.dataset_save_path is not None:
             dataset_dict.save_to_disk(args.dataset_save_path)
             pickle.dump(game_history, open(args.game_history_path, "wb"))
             pickle.dump(action_history, open(args.action_history_path, "wb"))
@@ -218,13 +218,13 @@ def main():
             pickle.dump(action_history, open("action_history.pkl", "wb"))
 
         # Augment dataset
-        with torch.no_grad():
-            dataset_dict = dataset_dict.map(
-                lambda x: _augment_dataset_generator(x, modules, args, tokenizer.generator), 
-                batched=True, 
-                batch_size=args.bsz,
-                remove_columns=[col for col in dataset_dict.column_names["train"] if col not in ["input_ids", "labels"]]
-                )
+        #with torch.no_grad():
+            #dataset_dict = dataset_dict.map(
+                #lambda x: _augment_dataset_generator(x, modules, args, tokenizer.generator), 
+               # batched=True, 
+               # batch_size=args.bsz,
+               # remove_columns=[col for col in dataset_dict.column_names["train"] if col not in ["input_ids", "labels"]]
+               # )
 
     elif model_type == ModelType.retriever:
         dataset_dict = get_dataset(args)
@@ -237,8 +237,8 @@ def main():
 
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        evaluation_strategy="epoch",
-        eval_steps=5000,
+        evaluation_strategy="steps",
+        eval_steps=10000,
         num_train_epochs=args.epochs,
         logging_strategy="steps",
         logging_steps=5000,
