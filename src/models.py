@@ -229,6 +229,78 @@ class HistoryRetriever(SubRetriever):
         return samples
 
 
+class Generator(GPT2LMHeadModel):
+
+    def forward(self, input_ids, labels=None, lengths=None):
+        max_length = lengths.max().item()
+        input_ids = input_ids[:, :max_length]
+        labels = labels[:, :max_length]
+        return super().forward(input_ids=input_ids, labels=labels)
+
+
+
+class QLearning(BertForPreTraining):
+    """Controller decides which type of latent to use"""
+    def __init__(self, config):
+        super().__init__(config)
+        self.bert = BertModel(config)
+        self.scorer = nn.Linear(config.hidden_size, 1)
+
+    def encode(self, input_ids, attention_mask):
+        return get_embedding(self.bert, input_ids, attention_mask)
+
+    def act(self, ctx_embed, act_embed):
+        ctx_act_scores = (ctx_embed.unsqueeze(1) * act_embed).sum(-1)
+        ctx_act_probs = F.softmax(ctx_act_scores, dim=-1)
+
+        act_embed = (ctx_act_probs.unsqueeze(-1) * act_embed).sum(-1)
+
+        embed = ctx_embed + act_embed
+
+        score = self.scorer(embed)
+
+        return score
+
+
+    def forward(
+        self,
+        input_ids,
+        attention_mask,
+        act_input_ids,
+        act_attention_mask
+    ):
+
+        bsz, num_acts = act_input_ids.shape[:2]
+
+        ctx_embed = self.bert(
+            input_ids, 
+            attention_mask=attention_mask
+        ).last_hidden_state[:, 0, :] * bert_scaling_factor
+
+        # Unroll actions
+        flat_act_input_ids = act_input_ids.reshape(bsz*num_acts, -1)
+        flat_act_attn_mask = act_attention_mask.reshape(bsz*num_acts, -1)
+
+        act_embed = self.bert(
+            flat_act_input_ids,
+            attention_mask=flat_act_attn_mask
+        ).last_hidden_state[:, 0, :] * bert_scaling_factor
+
+        act_embed = act_embed.reshape([bsz, num_acts, -1])
+
+        ctx_act_scores = (ctx_embed.unsqueeze(1) * act_embed).sum(-1)
+        ctx_act_probs = F.softmax(ctx_act_scores, dim=-1)
+
+        act_embed = (ctx_act_probs.unsqueeze(-1) * act_embed).sum(-1)
+
+        embed = ctx_embed + act_embed
+
+        score = self.scorer(embed)
+
+        return score
+
+
+
 @dataclass
 class ModuleList:
     generator: PreTrainedModel = None
@@ -259,7 +331,7 @@ def get_model(args, game_history=None, action_history=None):
 
     if model_type in [ModelType.generator, ModelType.controller]:
         tokenizer = get_tokenizer(args)
-        generator = GPT2LMHeadModel.from_pretrained(args.generator_path).to(args.device)
+        generator = Generator.from_pretrained(args.generator_path).to(args.device)
         retriever = BertModel.from_pretrained(args.retriever_path).to(args.device)
         retriever.eval()
         hist, act, intent = _get_retrievers(retriever, game_history, action_history, tokenizer)
