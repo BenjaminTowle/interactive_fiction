@@ -53,6 +53,8 @@ class Args:
     generator_path: str = "distilgpt2"
     retriever_path: str = "huawei-noah/TinyBERT_General_4L_312D"
     controller_path: str = "huawei-noah/TinyBERT_General_4L_312D"
+    gold_save_path: str = None
+    f1_save_path: str = None
 
     generator_tokenizer: str = "gpt2"
     retriever_tokenizer: str = "bert-base-uncased"
@@ -154,16 +156,14 @@ def main():
                     top_k=gen_args.top_k,
                     top_p=gen_args.top_p,
                     max_length=input_ids.shape[-1] + 10,
+                    min_length=input_ids.shape[-1] + 2,
                     pad_token_id=tokenizer.generator.eos_token_id
                 )
                 pred = tokenizer.generator.decode(outputs[0, input_ids.shape[-1]:], skip_special_tokens=True)
                 #remove trailing space
-                if pred[0] == " ":
+                if len(pred) > 0 and pred[0] == " ":
                     pred = pred[1:]
-                preds.append(pred)
-
-        if j == 0:
-            print("Examples preds: ", preds[:5])
+                preds.append(pred)    
 
         game = batch["games"][0]
 
@@ -188,6 +188,7 @@ def main():
         game2gold[game].append(gold_recall)
 
         if j % 100 == 0:
+            print("Examples preds: ", preds)
             print("Current gold recall: ", mean(all_gold))
 
     for game, valid_recall in game2gold.items():
@@ -199,6 +200,9 @@ def main():
         print(game, mean(valid_recall))
 
     print(mean(all_f1))
+
+    pickle.dump(all_gold, open(args.gold_save_path, "wb"))
+    pickle.dump(all_f1, open(args.f1_save_path, "wb"))
 
 
 if __name__ == "__main__":
