@@ -314,7 +314,7 @@ def _process_clubfloyd_generator_controller(files, tokenizer, args) -> Dataset:
 
             with open(os.path.join(args.data_directory, file)) as f:
                 lines = f.readlines()
-                states, observations, actions = _split_into_states_actions(lines, tokenizer.generator.eos_token, return_observations=True)
+                states, observations, actions = _split_into_states_actions(lines, tokenizer.generator.sep_token, return_observations=True)
                 query_states = _split_into_states_actions(lines, tokenizer.question_encoder.sep_token)[0]
 
                 if states == [] or observations == []:
@@ -382,6 +382,122 @@ def _process_clubfloyd_generator_controller(files, tokenizer, args) -> Dataset:
             states_inputs.input_ids = [ids[-args.max_state_length:] for ids in states_inputs.input_ids]
             target_actions_inputs = tokenizer(all_actions, max_length=args.max_action_length, truncation=True)
 
+            states_actions = [s + [tokenizer.generator.sep_token_id] + a for s, a in zip(states_inputs.input_ids, target_actions_inputs.input_ids)]  
+            mask = [[0] * (len(s) + 1) + [1] * len(a) for s, a in zip(states_inputs.input_ids, target_actions_inputs.input_ids)] 
+            labels = []
+            for sent, mm in zip(states_actions, mask):
+                labels.append([idx if m == 1 else -100 for idx, m in zip(sent, mm)])
+
+        dict_ = {
+            "input_ids": states_actions, 
+            "query_input_ids": query_inputs.input_ids,
+            "query_attention_mask": query_inputs.attention_mask,
+            "labels": labels,
+            "action_input_ids": actions_inputs.input_ids,
+            "action_attention_mask": actions_inputs.attention_mask,
+            "sample_idxs": sample_idxs,
+            "game_idxs": game_idxs,
+            "games": games,
+            "knowledge_labels": knowledge_labels,
+            "intent_labels": intent_labels
+        }
+
+        dataset = Dataset.from_dict(dict_)
+
+        dataset_dict[split] = dataset
+
+    return dataset_dict, game_history, action_history
+
+
+
+def _process_dailydialog_generator_controller(tokenizer, args) -> Dataset:
+    dataset_dict = load_dataset("daily_dialog") 
+
+    game_history = GameHistory(args.max_history_length)
+    action_history = GameHistory(args.max_action_length)
+    k = 0                               
+    for split in ["train", "test"]:
+
+        all_states = []
+        all_query_states = []
+        all_actions = []
+        games = []
+        game_idxs = []
+        knowledge_labels = []
+        intent_labels = []
+
+        for i, dialog in enumerate(dataset_dict[split]):
+
+            if args.debug:
+                if i == 3:
+                    break
+
+            states, observations, actions = _split_into_states_actions(dialog["dialog"], tokenizer.generator.eos_token, tokenizer.generator.pad_token)
+            query_states = _split_into_states_actions(dialog["dialog"], tokenizer.question_encoder.sep_token, tokenizer.question_encoder.pad_token)[0]
+
+            if states == [] or observations == []:
+                continue
+
+            obs_tokens = tokenizer(observations, max_length=args.max_history_length, padding="max_length", truncation=True)
+            with tokenizer.as_target_tokenizer():
+                obs_target_tokens = tokenizer(observations, max_length=args.max_history_length, padding="max_length", truncation=True)
+            act_tokens = tokenizer(actions, max_length=args.max_action_length, padding="max_length", truncation=True)
+            with tokenizer.as_target_tokenizer():
+                act_target_tokens = tokenizer(actions, max_length=args.max_history_length, padding="max_length", truncation=True) 
+            for j in range(len(observations)):
+                game_history.push(
+                    game=k, 
+                    input_ids=obs_tokens.input_ids[j], 
+                    attention_mask=obs_tokens.attention_mask[j],
+                    target_input_ids=obs_target_tokens.input_ids[j],
+                    target_attention_mask=obs_target_tokens.attention_mask[j]
+                )
+                action_history.push(
+                    game=k,
+                    input_ids=act_tokens.input_ids[j], 
+                    attention_mask=act_tokens.attention_mask[j],
+                    target_input_ids=act_target_tokens.input_ids[j],
+                    target_attention_mask=act_target_tokens.attention_mask[j]
+                )
+            
+            tfidf = TfidfVectorizer()
+            tfidf.fit(states + observations)
+
+            # For each action find the most relevant previous observation
+            obs_embed = tfidf.transform(observations)
+            act_embed = tfidf.transform(actions)
+
+            scores = linear_kernel(act_embed, obs_embed)
+            mask = np.ones([len(actions), len(observations)])
+
+            for a in range(len(actions)):
+                for o in range(len(observations)):
+                    if o > a:
+                        mask[a, o] = 0
+
+            scores *= mask
+
+            game_idxs += [j for j in range(len(observations))]
+            games += [k for _ in observations]
+            all_states += states
+            all_query_states += query_states
+            all_actions += actions
+            knowledge_labels += scores.argmax(-1).tolist()
+            intent_labels += dialog["act"]
+
+            k += 1
+
+        intent_labels = get_intents(all_actions)
+
+        query_inputs = tokenizer(all_query_states, max_length=args.max_state_length, truncation=True, padding="max_length")
+        actions_inputs = tokenizer(all_actions, max_length=args.max_action_length, truncation=True, padding="max_length")
+        sample_idxs = [i for i in range(len(all_actions))]
+
+        with tokenizer.as_target_tokenizer(): 
+            all_actions = [a + tokenizer.generator.eos_token for a in all_actions] 
+            states_inputs = tokenizer(all_states, max_length=args.max_state_length, truncation=True)
+            target_actions_inputs = tokenizer(all_actions, max_length=args.max_action_length, truncation=True)
+
             states_actions = [s + [tokenizer.generator.eos_token_id] + a for s, a in zip(states_inputs.input_ids, target_actions_inputs.input_ids)]  
             mask = [[0] * (len(s) + 1) + [1] * len(a) for s, a in zip(states_inputs.input_ids, target_actions_inputs.input_ids)] 
             labels = []
@@ -400,6 +516,168 @@ def _process_clubfloyd_generator_controller(files, tokenizer, args) -> Dataset:
             "games": games,
             "knowledge_labels": knowledge_labels,
             "intent_labels": intent_labels
+        }
+
+        dataset = Dataset.from_dict(dict_)
+
+        dataset_dict[split] = dataset
+
+    return dataset_dict, game_history, action_history
+
+def _process_clubfloyd_generator_controller2(files, tokenizer, args) -> Dataset:
+    dataset_dict = {}
+    #random.shuffle(files)
+    idx = int(len(files)*args.test_size)
+    train_files = files[:-idx]
+    test_files = files[-idx:]
+
+    game_history = GameHistory(args.max_history_length)
+    action_history = GameHistory(args.max_action_length)
+    k = 0                               
+    for split, fs in [("train", train_files), ("test", test_files)]:
+
+        all_states = []
+        all_query_states = []
+        all_actions = []
+        games = []
+        game_idxs = []
+        knowledge_labels = []
+
+        prev_observations = []
+        prev_actions = []
+
+        for i, file in enumerate(fs):
+
+            if args.debug:
+                if i == 3:
+                    break
+
+            with open(os.path.join(args.data_directory, file)) as f:
+                lines = f.readlines()
+                states, observations, actions = _split_into_states_actions(lines, tokenizer.generator.sep_token, return_observations=True)
+                query_states = _split_into_states_actions(lines, tokenizer.question_encoder.sep_token)[0]
+
+                if states == [] or observations == []:
+                    continue
+
+                obs_tokens = tokenizer(observations, max_length=args.max_history_length, padding="max_length", truncation=True)
+                with tokenizer.as_target_tokenizer():
+                    obs_target_tokens = tokenizer(observations, max_length=args.max_history_length, padding="max_length", truncation=True)
+                act_tokens = tokenizer(actions, max_length=args.max_action_length, padding="max_length", truncation=True)
+                with tokenizer.as_target_tokenizer():
+                    act_target_tokens = tokenizer(actions, max_length=args.max_history_length, padding="max_length", truncation=True) 
+                for j in range(len(observations)):
+                    game_history.push(
+                        game=k, 
+                        input_ids=obs_tokens.input_ids[j], 
+                        attention_mask=obs_tokens.attention_mask[j],
+                        target_input_ids=obs_target_tokens.input_ids[j],
+                        target_attention_mask=obs_target_tokens.attention_mask[j]
+                    )
+                    action_history.push(
+                        game=k,
+                        input_ids=act_tokens.input_ids[j], 
+                        attention_mask=act_tokens.attention_mask[j],
+                        target_input_ids=act_target_tokens.input_ids[j],
+                        target_attention_mask=act_target_tokens.attention_mask[j]
+                    )
+                
+                tfidf = TfidfVectorizer()
+                tfidf.fit(states + observations)
+
+                # For each action find the most relevant previous observation
+                obs_embed = tfidf.transform(observations)
+                act_embed = tfidf.transform(actions)
+
+                obs_scores = linear_kernel(act_embed, obs_embed)
+                act_scores = linear_kernel(act_embed, act_embed)
+                obs_mask = np.ones([len(actions), len(observations)])
+                act_mask = np.ones([len(actions), len(actions)])
+
+                for a in range(len(actions)):
+                    for o in range(len(observations)):
+                        if o > a:
+                            obs_mask[a, o] = 0
+
+                for a1 in range(len(actions)):
+                    for a2 in range(len(actions)):
+                        if a2 >= a1:
+                            act_mask[a1, a2] = 0
+
+                obs_scores *= obs_mask
+                act_scores *= act_mask
+
+                game_idxs += [j for j in range(len(observations))]
+                games += [k for _ in observations]
+                all_states += states
+                all_query_states += query_states
+                all_actions += actions
+                knowledge_labels += obs_scores.argmax(-1).tolist()
+
+                prev_observations += [observations[s] for s in obs_scores.argmax(-1).tolist()]
+                prev_actions += [actions[s] for s in act_scores.argmax(-1).tolist()]
+
+                k += 1
+
+        intent_labels = get_intents(all_actions)
+
+        intents = ["navigate", "examine", "hoard", "interact", "other"]
+        with tokenizer.as_target_tokenizer():
+            target_intent_tokens = tokenizer([i + ": " for i in intents])
+            intents = [target_intent_tokens.input_ids[i] for i in intent_labels]
+            prev_actions = tokenizer(prev_actions)
+            prev_actions = [a[-args.max_action_length:] for a in prev_actions.input_ids]
+            prev_observations = tokenizer(prev_observations)
+            prev_observations = [a[-args.max_history_length:] for a in prev_observations.input_ids]
+
+        query_inputs = tokenizer(all_query_states, max_length=args.max_state_length, padding="max_length")
+        query_inputs.input_ids = [ids[-args.max_state_length:] for ids in query_inputs.input_ids]
+        query_inputs.attention_mask = [ids[-args.max_state_length:] for ids in query_inputs.attention_mask]
+        actions_inputs = tokenizer(all_actions, max_length=args.max_action_length, padding="max_length")
+        sample_idxs = [i for i in range(len(all_actions))]
+
+        with tokenizer.as_target_tokenizer(): 
+            all_actions = [a + tokenizer.generator.eos_token for a in all_actions] 
+            states_inputs = tokenizer(all_states, max_length=args.max_state_length)
+            states_inputs.input_ids = [ids[-args.max_state_length:] for ids in states_inputs.input_ids]
+            target_actions_inputs = tokenizer(all_actions, max_length=args.max_action_length, truncation=True)
+
+            states_actions = [s + [tokenizer.generator.sep_token_id] + a for s, a in zip(states_inputs.input_ids, target_actions_inputs.input_ids)]  
+            mask = [[0] * (len(s) + 1) + [1] * len(a) for s, a in zip(states_inputs.input_ids, target_actions_inputs.input_ids)] 
+            labels = []
+            for sent, mm in zip(states_actions, mask):
+                labels.append([idx if m == 1 else -100 for idx, m in zip(sent, mm)])
+
+        # Create triples of input_ids
+        new_input_ids = []
+        new_labels = []
+        for i in range(len(states_actions)):
+            new_input_ids.append([tokenizer.generator.cls_token_id] + prev_observations[i] + [tokenizer.generator.sep_token_id] + states_actions[i])
+            new_input_ids.append([tokenizer.generator.cls_token_id] + intents[i] + [tokenizer.generator.sep_token_id] + states_actions[i])
+            new_input_ids.append([tokenizer.generator.cls_token_id] + prev_actions[i] + [tokenizer.generator.sep_token_id] + states_actions[i])
+            new_labels.append([-100] * (len(prev_observations[i]) + 2) + labels[i])
+            new_labels.append([-100] * (len(intents[i]) + 2) + labels[i])
+            new_labels.append([-100] * (len(prev_actions[i]) + 2) + labels[i])
+
+        # Add padding
+        padded_input_ids = []
+        padded_labels = []
+        lengths = []
+        for i in range(len(new_input_ids)):
+            padded_input_ids.append(
+                new_input_ids[i] if len(new_input_ids[i]) == args.max_length
+                else new_input_ids[i] + [tokenizer.generator.pad_token_id] * (args.max_length - len(new_input_ids[i])))
+            padded_labels.append(
+                new_labels[i] if len(new_labels[i]) == args.max_length 
+                else new_labels[i] + [-100] * (args.max_length - len(new_labels[i])))
+            lengths.append(len(new_input_ids))
+
+
+
+        dict_ = {
+            "input_ids": padded_input_ids, 
+            "labels": padded_labels,
+            "lengths": lengths
         }
 
         dataset = Dataset.from_dict(dict_)
@@ -429,7 +707,7 @@ def _get_dataset_clubfloyd(args, tokenizer):
         dataset_dict = DatasetDict({"train": dataset_dict["train"], "test": dataset_dict["test"]})
         return dataset_dict
 
-    dataset_dict, game_history, action_history = _process_clubfloyd_generator_controller(files, tokenizer, args)
+    dataset_dict, game_history, action_history = _process_clubfloyd_generator_controller2(files, tokenizer, args)
 
     dataset_dict = DatasetDict({"train": dataset_dict["train"], "test": dataset_dict["test"]})
 
