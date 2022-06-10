@@ -149,21 +149,25 @@ def main():
                     torch.tensor([doc]),
                     torch.tensor([[tokenizer.generator.eos_token_id]]),
                     torch.tensor([batch["input_ids"]])], dim=-1).to(args.device)
-                outputs = modules.generator.generate(
-                    input_ids=input_ids,
-                    do_sample=gen_args.do_sample,
-                    num_beams=gen_args.num_beams,
-                    top_k=gen_args.top_k,
-                    top_p=gen_args.top_p,
-                    max_length=input_ids.shape[-1] + 10,
-                    min_length=input_ids.shape[-1] + 1,
-                    pad_token_id=tokenizer.generator.eos_token_id
-                )
-                pred = tokenizer.generator.decode(outputs[0, input_ids.shape[-1]:], skip_special_tokens=True)
-                #remove trailing space
-                if len(pred) > 0 and pred[0] == " ":
-                    pred = pred[1:]
-                preds.append(pred)    
+                while True:
+                    outputs = modules.generator.generate(
+                        input_ids=input_ids,
+                        do_sample=gen_args.do_sample,
+                        num_beams=gen_args.num_beams,
+                        top_k=gen_args.top_k,
+                        top_p=gen_args.top_p,
+                        max_length=input_ids.shape[-1] + 10,
+                        min_length=input_ids.shape[-1] + 1,
+                        pad_token_id=tokenizer.generator.eos_token_id
+                    )
+                    pred = tokenizer.generator.decode(outputs[0, input_ids.shape[-1]:], skip_special_tokens=True)
+                    #remove trailing space
+                    if len(pred) > 0 and pred[0] == " ":
+                        pred = pred[1:]
+
+                    if pred not in preds:
+                        preds.append(pred)   
+                        break 
 
         game = batch["games"][0]
 
