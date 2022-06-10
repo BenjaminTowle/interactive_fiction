@@ -156,7 +156,11 @@ def main():
                     max_length=input_ids.shape[-1] + 10,
                     pad_token_id=tokenizer.generator.eos_token_id
                 )
-                preds.append(tokenizer.generator.decode(outputs[0, input_ids.shape[-1]:], skip_special_tokens=True))
+                pred = tokenizer.generator.decode(outputs[0, input_ids.shape[-1]:], skip_special_tokens=True)
+                #remove trailing space
+                if pred[0] == " ":
+                    pred = pred[1:]
+                preds.append(pred)
 
         if j == 0:
             print("Examples preds: ", preds[:5])
