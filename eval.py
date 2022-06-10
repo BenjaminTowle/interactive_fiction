@@ -105,7 +105,7 @@ def main():
     all_f1 = []
     all_gold = []
 
-    for batch in test_dl:
+    for j, batch in enumerate(test_dl):
         # Two step sampling procedure
 
         # Sample an action from the controller
@@ -158,6 +158,9 @@ def main():
                 )
                 preds.append(tokenizer.generator.decode(outputs[0, input_ids.shape[-1]:], skip_special_tokens=True))
 
+        if j == 0:
+            print("Examples preds: ", preds[:5])
+
         game = batch["games"][0]
 
         if game not in game2gold:
@@ -179,6 +182,9 @@ def main():
                 break
         all_gold.append(gold_recall)
         game2gold[game].append(gold_recall)
+
+        if j % 100 == 0:
+            print("Current gold recall: ", mean(all_gold))
 
     for game, valid_recall in game2gold.items():
         print(game, mean(valid_recall))
