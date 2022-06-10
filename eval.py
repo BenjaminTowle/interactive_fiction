@@ -43,10 +43,10 @@ class Args:
     data_directory: str = field(default="test_game.jsonl", metadata={"help": "path to Jericho transcripts."})
     dataset_load_path: str = None #"clubfloyd_dataset_t5" #"clubfloyd_dataset"
     dataset_save_path: str = None
-    max_state_length: int = 256
+    max_state_length: int = 64
     max_action_length: int = 8
     max_history_length: int = 64
-    max_length: int = 312
+    max_length: int = 200
 
     debug: bool = False
 
@@ -141,9 +141,11 @@ def main():
 
             # Build input_ids
             for i in range(cnt):
+                # Remove padding from doc
+                doc = [w for w in docs["target_input_ids"][i] if w != tokenizer.generator.pad_token_id]
                 input_ids = torch.cat([
-                    torch.tensor([docs["target_input_ids"][i]]),
-                    torch.tensor([[tokenizer.generator.sep_token_id]]),
+                    torch.tensor([doc]),
+                    torch.tensor([[tokenizer.generator.eos_token_id]]),
                     torch.tensor([batch["input_ids"]])], dim=-1).to(args.device)
                 outputs = modules.generator.generate(
                     input_ids=input_ids,
@@ -151,9 +153,10 @@ def main():
                     num_beams=gen_args.num_beams,
                     top_k=gen_args.top_k,
                     top_p=gen_args.top_p,
-                    max_length=input_ids.shape[-1] + 10
+                    max_length=input_ids.shape[-1] + 10,
+                    pad_token_id=tokenizer.generator.eos_token_id
                 )
-                preds.append(tokenizer.decode(outputs[0, input_ids.shape[0]:], skip_special_tokens=True))
+                preds.append(tokenizer.generator.decode(outputs[0, input_ids.shape[-1]:], skip_special_tokens=True))
 
         game = batch["games"][0]
 
